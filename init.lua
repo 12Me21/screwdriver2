@@ -170,7 +170,7 @@ local function use_screwdriver(itemstack, user, pointed_thing, right)
 			table.copy(node),
 			user,
 			screwdriver.ROTATE_AXIS,
-			new_param2
+			node.param2
 		)
 		if result == false then return end
 		if result == true then swap_node = false end
