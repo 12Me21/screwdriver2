@@ -104,7 +104,7 @@ local function choose_rotation(normal, point)
 	return "y", 0
 end
 
-local function screwdriver(itemstack, user, pointed_thing, right)
+local function use_screwdriver(itemstack, user, pointed_thing, right)
 	if pointed_thing.type ~= "node" then return end
 	local pos = pointed_thing.under
 	-- Check protection
@@ -178,10 +178,10 @@ minetest.register_craftitem("screwdriver2:screwdriver",{
 	description = "Screwdriver. Figure it out yourself. It's not that hard, you dumb idiot.",
 	inventory_image = "screwdriver2.png",
 	on_use = function(itemstack, user, pointed_thing)
-		return screwdriver(itemstack, user, pointed_thing, false)
+		return use_screwdriver(itemstack, user, pointed_thing, false)
 	end,
 	on_place = function(itemstack, user, pointed_thing)
-		return screwdriver(itemstack, user, pointed_thing, true)
+		return use_screwdriver(itemstack, user, pointed_thing, true)
 	end,
 })
 
