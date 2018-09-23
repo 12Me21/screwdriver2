@@ -163,6 +163,7 @@ local function use_screwdriver(itemstack, user, pointed_thing, right)
 	
 	-- Replace node
 	if not handled then minetest.swap_node(pos, node) end -- node.param2 has been changed
+	minetest.check_for_falling(pos)
 	if def.after_rotate then def.after_rotate(pos) end
 	
 	-- Apply wear if not in creative mode
