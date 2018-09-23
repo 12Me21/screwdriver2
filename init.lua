@@ -119,7 +119,7 @@ local function use_screwdriver(itemstack, user, pointed_thing, right)
 	local def = minetest.registered_nodes[node.name]
 	if not def then return end
 	
-	if def.on_rotate == false or (def.can_dig and not ndef.can_dig(vector.new(pos), user)) then return end
+	if def.on_rotate == false --[[or (def.can_dig and not def.can_dig(vector.new(pos), user))]] then return end
 	
 	-- Rotate
 	if def.paramtype2 == "facedir" or def.paramtype2 == "colorfacedir" then
