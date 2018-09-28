@@ -1,3 +1,8 @@
+if not minetest.raycast then
+	minetest.log("error", "screwdriver2 requires minetest version 5.0 or newer")
+	return
+end
+
 local function disp(...)
 	for _, x in ipairs({...}) do
 		minetest.chat_send_all(dump(x))
