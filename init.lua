@@ -235,7 +235,7 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	if sound then
 		minetest.sound_play(sound,{
 			pos = pos,
-			gain = 0.5,
+			gain = 0.25,
 			max_hear_distance = 32,
 		})
 	end
