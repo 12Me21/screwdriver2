@@ -1,9 +1,20 @@
+if not minetest.raycast then
+	minetest.log("error", "screwdriver2 requires minetest version 5.0 or newer")
+	return
+end
+
+local function disp(...)
+	for _, x in ipairs({...}) do
+		minetest.chat_send_all(dump(x))
+	end
+end
+
 screwdriver2 = {}
 
--- Some mods may rely on screwdiver.ROTATE_FACE/ROTATE_AXIS existing in their
--- on_rotate functions, not expecting on_rotate to be called if screwdriver
--- is not installed.
 if not screwdriver then
+	-- Some mods may rely on screwdiver.ROTATE_FACE/ROTATE_AXIS existing in their
+	-- on_rotate functions, not expecting on_rotate to be called if screwdriver
+	-- is not installed.
 	screwdriver = {
 		ROTATE_FACE = 1,
 		ROTATE_AXIS = 2,
@@ -11,61 +22,43 @@ if not screwdriver then
 end
 -- Override old rotate_simple function with a safer/better one
 -- Should have the same result in all normal cases
-screwdriver2.rotate_simple = function(pos, node, user, _, new_param2)
+function screwdriver2.rotate_simple(_, _, _, _, new_param2)
 	if new_param2 > 3 then return false end
 end
-
 screwdriver.rotate_simple = screwdriver2.rotate_simple
 
--- Accuracy problems:
--- 1: eye height does not take the walking animation into account, which moves the camera slightly up and down
--- 2: Converting the pitch/yaw angles into a vector then multiplying it by 20 is probably not the most accurate thing to do
--- 3: General innacuracies from all calculations
-local function get_point(placer)
-	local placer_pos = placer:get_pos()
-	placer_pos.y = placer_pos.y + placer:get_properties().eye_height
-	local raycast = minetest.raycast(placer_pos, vector.add(placer_pos, vector.multiply(placer:get_look_dir(), 20)), false)
-	local pointed = raycast:next()
-	if pointed and pointed.type == "node" then
-		return pointed.intersection_normal,
-		       vector.subtract(pointed.intersection_point,pointed.under),
-		       pointed.box_id -- 2 tabs + 7 spaces
-	end
-end
+local get_pointed = dofile(minetest.get_modpath("screwdriver2").."/pointed.lua")
 
--- Don't worry about this
-local insanity_2 = {
-	["xy"] =  1, --xyz
-	["yz"] =  1,
-	["zx"] =  1,
-	["zy"] = -1, --zyx
-	["yx"] = -1,
-	["xz"] = -1,
-}
 -- Functions to choose rotation based on pointed location
+local insanity_2 = {xy = 1, yz = 1, zx = 1; zy = -1, yx = -1, xz = -1} -- Don't worry about this
 local function push_edge(normal, point)
-	local best = 0
+	local biggest = 0
 	local biggest_axis
 	local normal_axis
+	-- Find the normal axis, and the axis of the with the
+	-- greatest magnitude (other than the normal axis)
 	for axis in pairs(point) do
 		if normal[axis] ~= 0 then
-			point[axis] = 0
 			normal_axis = axis
-		elseif math.abs(point[axis])>best then
-			best = math.abs(point[axis])
+		elseif math.abs(point[axis])>biggest then
+			biggest = math.abs(point[axis])
 			biggest_axis = axis
 		end
 	end
+	-- Find the third axis, which is the one to rotate around
 	if normal_axis and biggest_axis then
+		
 		for axis in pairs(point) do
 			if axis ~= normal_axis and axis ~= biggest_axis then
+				-- Decide which direction to rotate (+ or -)
 				return axis, insanity_2[normal_axis..biggest_axis] * math.sign(normal[normal_axis] * point[biggest_axis])
 			end
 		end
 	end
 	return "y", 0
 end
-local function rotate_face(normal, point)
+local function rotate_face(normal, _)
+	-- Find the normal axis
 	for axis, value in pairs(normal) do
 		if value ~= 0 then
 			return axis, math.sign(value)
@@ -90,17 +83,21 @@ local wallmounted_cycles = {
 }
 -- Functions to rotate a facedir/wallmounted value around an axis by a certain amount
 local rotate = {
+	-- Facedir: lower 5 bits used for direction, 0 - 23
 	facedir = function(param2, axis, amount)
 		local facedir = param2 % 32
 		for _, cycle in ipairs(facedir_cycles[axis]) do
+			-- Find the current facedir
+			-- Minetest adds table.indexof, but I refuse to use it because it returns -1 rather than nil
 			for i, fd in ipairs(cycle) do
 				if fd == facedir then
-					return param2 - facedir + cycle[1+(i-1 + amount) % 4]
+					return param2 - facedir + cycle[1+(i-1 + amount) % 4] -- If only Lua didn't use 1 indexing...
 				end
 			end
 		end
 		return param2
 	end,
+	-- Wallmounted: lower 3 bits used, 0 - 5
 	wallmounted = function(param2, axis, amount)
 		local wallmounted = param2 % 8
 		for i, wm in ipairs(wallmounted_cycles[axis]) do
@@ -113,58 +110,143 @@ local rotate = {
 }
 rotate.colorfacedir = rotate.facedir
 rotate.colorwallmounted = rotate.wallmounted
+--Todo: maybe support degrotate?
 
-local function use_screwdriver(itemstack, user, pointed_thing, right)
+local function rect(angle, radius)
+	return math.cos(2*math.pi * angle) * radius, math.sin(2*math.pi * angle) * radius
+end
+
+-- Generate the screwdriver particle effects
+local other_axes = {x = {"y","z"}, y = {"z","x"}, z = {"x","y"}}
+local function particle_ring(pos, axis, direction)
+	local axis2, axis3 = unpack(other_axes[axis])
+	local particle_pos = vector.new()
+	local particle_vel = vector.new()
+	for i = 0, 0.999, 1/6 do
+		particle_pos[axis3], particle_pos[axis2] = rect(i, 0.5^0.5)
+		particle_vel[axis3], particle_vel[axis2] = rect(i - 1/4 * direction, 2)
+		
+		minetest.add_particle({
+			pos = vector.add(pos, particle_pos),
+			velocity = particle_vel,
+			acceleration = vector.multiply(particle_pos, -7),
+			expirationtime = 0.25,
+			size = 2,
+			texture = "screwdriver2.png",
+		})
+		-- Smaller particles that last slightly longer, to give the illusion of
+		-- the particles disappearing smoothly
+		-- ?
+		-- minetest.add_particle({
+			-- pos = vector.add(pos, particle_pos),
+			-- velocity = particle_vel,
+			-- acceleration = vector.multiply(particle_pos, -7),
+			-- expirationtime = 0.3,
+			-- size = 1,
+			-- texture = "screwdriver2.png",
+		-- })
+	end
+end
+
+-- Decide what sound to make when rotating a node
+local sound_groups = {"cracky", "crumbly", "dig_immediate", "metal", "choppy", "oddly_breakable_by_hand", "snappy"}
+local function get_dig_sound(def)
+	if def.sounds and def.sounds.dig then
+		return def.sounds.dig
+	elseif not def.sound_dig or def.sound_dig == "__group" then
+		local groups = def.groups
+		for i, name in ipairs(sound_groups) do
+			if groups[name] and groups[name] > 0 then
+				return "default_dig_"..name
+			end
+		end
+	else
+		return def.sound_dig
+	end
+end
+
+-- Main
+function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	if pointed_thing.type ~= "node" then return end
 	local pos = pointed_thing.under
+	
 	-- Check protection
-	local player_name = user:get_player_name()
+	local player_name = player:get_player_name()
 	if minetest.is_protected(pos, player_name) then
 		minetest.record_protection_violation(pos, player_name)
 		return
 	end
+	
 	-- Get node info
 	local node = minetest.get_node_or_nil(pos)
 	if not node then return end
 	local def = minetest.registered_nodes[node.name]
 	if not def then return end -- probably unnessesary
 	
+	disp(def.sound_dig)
+	
 	if def.on_rotate == false then return end
-	--if def.on_rotate == nil and def.can_dig and not def.can_dig(vector.new(pos), user) then return end
+	--if def.on_rotate == nil and def.can_dig and not def.can_dig(vector.new(pos), player) then return end
 	
 	-- Choose rotation function based on paramtype2 (facedir/wallmounted)
 	local rotate_function = rotate[def.paramtype2]
-	if rotate_function then
-		-- Right-click = rotate face
-		if right then
-			node.param2 = rotate_function(node.param2, rotate_face(get_point(user)))
-		-- Left-click = push edge away
-		else
-			node.param2 = rotate_function(node.param2, push_edge(get_point(user)))
-		end
-	else
-		return
-	end
-	--Todo: maybe support paramtype2 = "degrotate"?
+	if not rotate_function then return end
 	
-	-- The on_rotate system is not very good...
-	-- Passing the rotation mode to on_rotate was a mistake
-	-- Mods expect ROTATE_AXIS or ROTATE_FACE, and may not work properly with custom rotation modes
-	-- Checking the rotation mode is unsafe and a bad idea.
-	-- If you want to disallow certain rotation states, please just
-	-- check new_param2.
-	-- Here I have hardcoded the mode to ROTATE_AXIS
+	-- Choose rotation axis/direction and param2 based on click type and pointed location
+	local axis, amount
+	local normal, point = get_pointed(player, pointed_thing)
+	if not normal or vector.length(normal) == 0 then return end -- Raycast failed or player is inside selection box
+	
+	local control = player:get_player_control()
+	if is_right_click then
+		axis, amount = rotate_face(normal, point)
+		-- This line intentionally left blank.
+	else
+		axis, amount = push_edge(normal, point)
+		if control.sneak then amount = -amount end
+	end
+	local new_param2 = rotate_function(node.param2, axis, amount)
+	
+	-- Calculate particle position
+	local particle_offset = vector.new()
+	particle_offset[axis] = point[axis]--math.sign(normal[axis]) * 0.5
+	
+	-- Handle node's on_rotate function
 	local handled
 	if type(def.on_rotate) == "function" then
-		local result = def.on_rotate(vector.new(pos), table.copy(node), user, screwdriver.ROTATE_AXIS, node.param2)
-		if result == false then return end
-		if result == true then handled = true end
+		local result = def.on_rotate(
+			vector.new(pos),
+			table.copy(node),
+			player,
+			is_right_click and 2 or 1,
+			new_param2
+		)
+		if result == false then
+			return
+		elseif result == true then
+			handled = true
+		end
+	end
+	
+	-- Draw particles (Todo: check if rotation was actually done)
+	particle_ring(vector.add(pos, particle_offset), axis, amount)
+	-- Sound
+	local sound = get_dig_sound(def)
+	if sound then
+		minetest.sound_play(sound,{
+			pos = pos,
+			gain = 0.5,
+			max_hear_distance = 32,
+		})
 	end
 	
 	-- Replace node
-	if not handled then minetest.swap_node(pos, node) end -- node.param2 has been changed
+	if not handled then
+		node.param2 = new_param2
+		minetest.swap_node(pos, node)
+	end
 	minetest.check_for_falling(pos)
-	if def.after_rotate then def.after_rotate(pos) end
+	if def._after_rotate then def._after_rotate(pos) end
 	
 	-- Apply wear if not in creative mode
 	if not(creative and creative.is_enabled_for(player_name)) then
@@ -173,30 +255,20 @@ local function use_screwdriver(itemstack, user, pointed_thing, right)
 	end
 end
 
-minetest.register_craftitem("screwdriver2:screwdriver",{
-	description = "Screwdriver", -- Improve
+minetest.register_tool("screwdriver2:screwdriver",{
+	description = "Better Screwdriver (left click = push edge, right click = rotate face)",
+	_doc_items_longdesc = "A tool for rotating nodes. Designed to be easier to use than the standard screwdriver.",
+	_doc_items_usagehelp = [[
+Left clicking a node will "push" its nearest edge away from you. (Hold sneak to reverse the direction.)
+Right click rotates the node clockwise around the face you are pointing at.]],
+	_doc_items_hidden = false,
 	inventory_image = "screwdriver2.png",
-	on_use = function(itemstack, user, pointed_thing)
-		return use_screwdriver(itemstack, user, pointed_thing, false)
+	on_use = function(itemstack, player, pointed_thing)
+		return screwdriver.use(itemstack, player, pointed_thing, false)
 	end,
-	on_place = function(itemstack, user, pointed_thing)
-		return use_screwdriver(itemstack, user, pointed_thing, true)
+	on_place = function(itemstack, player, pointed_thing)
+		return screwdriver.use(itemstack, player, pointed_thing, true)
 	end,
-})
-
--- Override screwdriver:screwdriver recipe:
-minetest.clear_craft({
-	recipe = {
-		{"default:steel_ingot"},
-		{"group:stick"},
-	},
-})
-minetest.register_craft({
-	output = "screwdriver2:screwdriver",
-	recipe = {
-		{"default:steel_ingot"},
-		{"group:stick"},
-	},
 })
 
 -- Just in case someone needs the old screwdriver, define a recipe to craft it.
@@ -211,4 +283,20 @@ if minetest.get_modpath("screwdriver") then
 		type = "shapeless",
 		recipe = {"screwdriver:screwdriver"},
 	})
+	
+	minetest.clear_craft({
+		recipe = {
+			{"default:steel_ingot"},
+			{"group:stick"},
+		},
+	})
 end
+
+-- Override screwdriver:screwdriver recipe:
+minetest.register_craft({
+	output = "screwdriver2:screwdriver",
+	recipe = {
+		{"default:steel_ingot"},
+		{"group:stick"},
+	},
+})
