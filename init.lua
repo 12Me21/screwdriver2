@@ -11,21 +11,22 @@ end
 
 screwdriver2 = {}
 
-if not screwdriver then
-	-- Some mods may rely on screwdiver.ROTATE_FACE/ROTATE_AXIS existing in their
-	-- on_rotate functions, not expecting on_rotate to be called if screwdriver
-	-- is not installed.
+local function rotate_simple(_, _, _, _, new_param2)
+	if new_param2 % 32 > 3 then return false end
+end
+
+-- If the screwdriver mod is not installed, create a fake screwdriver variable.
+-- (This mod has an optional dependancy on screwdriver, so minetest loads screwdriver first if it exists.)
+-- - Some mods will only set on_rotate when `screwdriver` exists.
+-- - Mods may expect `screwdiver` to exist if `on_rotate` is called.
+if not minetest.global_exists("screwdriver") then
 	screwdriver = {
 		ROTATE_FACE = 1,
 		ROTATE_AXIS = 2,
+		rotate_simple = rotate_simple,
+		disallow = false, -- I doubt anyone actually used screwdriver.disallow but whatever.
 	}
 end
--- Override old rotate_simple function with a safer/better one
--- Should have the same result in all normal cases
-function screwdriver2.rotate_simple(_, _, _, _, new_param2)
-	if new_param2 > 3 then return false end
-end
-screwdriver.rotate_simple = screwdriver2.rotate_simple
 
 local get_pointed = dofile(minetest.get_modpath("screwdriver2").."/pointed.lua")
 
@@ -185,8 +186,9 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	
 	disp(def.sound_dig)
 	
-	if def.on_rotate == false then return end
-	--if def.on_rotate == nil and def.can_dig and not def.can_dig(vector.new(pos), player) then return end
+	local on_rotate = def.on_rotate
+	if on_rotate == false then return end
+	--if on_rotate == nil and def.can_dig and not def.can_dig(vector.new(pos), player) then return end
 	
 	-- Choose rotation function based on paramtype2 (facedir/wallmounted)
 	local rotate_function = rotate[def.paramtype2]
@@ -213,8 +215,12 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	
 	-- Handle node's on_rotate function
 	local handled
-	if type(def.on_rotate) == "function" then
-		local result = def.on_rotate(
+	if type(on_rotate) == "function" then
+		-- If a mod is loaded after screwdriver but before screwdriver2,
+		-- it will still end up using the old `rotate_simple` function.
+		-- So, we'll check that here, and override it in that case.
+		if on_rotate == screwdriver.rotate_simple then on_rotate = rotate_simple end
+		local result = on_rotate(
 			vector.new(pos),
 			table.copy(node),
 			player,
@@ -242,6 +248,7 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	
 	-- Replace node
 	if not handled then
+		if new_param2 == node.param2 then return end -- no rotation was done
 		node.param2 = new_param2
 		minetest.swap_node(pos, node)
 	end
