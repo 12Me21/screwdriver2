@@ -167,6 +167,9 @@ local function get_dig_sound(def)
 end
 
 -- Main
+-- Idea: split this into 2 functions
+-- 1: on_use parameters -> axis/amount/etc.
+-- 2: param2/axis/amount/etc. -> new param2
 function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	if pointed_thing.type ~= "node" then return end
 	local pos = pointed_thing.under
@@ -224,8 +227,12 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 			vector.new(pos),
 			table.copy(node),
 			player,
-			is_right_click and 2 or 1,
-			new_param2
+			is_right_click and 2 or 1, -- Deprecated
+			new_param2,
+			-- New:
+			axis, -- "x", "y", or "z"
+			amount, -- 90 degrees = 1, etc.
+			rotate_function -- function(node.param2, axis, amount) -> new_param2
 		)
 		if result == false then
 			return
@@ -263,7 +270,7 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 end
 
 minetest.register_tool("screwdriver2:screwdriver",{
-	description = "Better Screwdriver (left click = push edge, right click = rotate face)",
+	description = "Better Screwdriver\nleft click = push edge, right click = rotate face",
 	_doc_items_longdesc = "A tool for rotating nodes. Designed to be easier to use than the standard screwdriver.",
 	_doc_items_usagehelp = [[
 Left clicking a node will "push" its nearest edge away from you. (Hold sneak to reverse the direction.)
@@ -307,3 +314,7 @@ minetest.register_craft({
 		{"group:stick"},
 	},
 })
+
+if minetest.get_modpath("worldedit") then
+	dofile(minetest.get_modpath("screwdriver2").."/worldedit.lua")
+end
