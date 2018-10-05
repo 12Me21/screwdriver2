@@ -8,7 +8,7 @@
 -- ==========================================================================
 
 -- Try to get the exact point the player is looking at.
--- There is some innacuracy due to the client-side view bobbing animation.
+-- There is some inaccuracy due to the client-side view bobbing animation.
 -- To prevent the wrong node face from being found, it checks to make sure
 -- the position returned by the raycaster matches pointed_thing.
 -- If it doesn't match, the raycast is done again with slight offsets.
@@ -87,5 +87,5 @@ return function(player, pointed_thing)
 		if a then return a, b, c end
 	end
 	
-	minetest.log("warning", "Could not get pointed position") -- Even though I tried really hard...
+	minetest.log("warning", "Could not get pointed position")
 end
