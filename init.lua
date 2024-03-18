@@ -263,7 +263,7 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	if def._after_rotate then def._after_rotate(pos) end
 	
 	-- Apply wear if not in creative mode
-	if not(creative and creative.is_enabled_for(player_name)) then
+	if not minetest.is_creative_enabled(player_name) then
 		itemstack:add_wear(65535 / 200)
 		return itemstack
 	end
