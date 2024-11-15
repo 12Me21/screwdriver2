@@ -107,10 +107,17 @@ local rotate = {
 			end
 		end
 		return param2
-	end
+	end,
+	-- 4dir: lower 2 bits used, 0 - 3
+	["4dir"] = function(param2, axis, amount)
+		if axis ~= "y" then return param2 end
+		local dir = param2 % 4
+		return param2 - dir + ((dir + amount) % 4)
+	end,
 }
 rotate.colorfacedir = rotate.facedir
 rotate.colorwallmounted = rotate.wallmounted
+rotate.color4dir = rotate["4dir"]
 --Todo: maybe support degrotate?
 
 local function rect(angle, radius)
