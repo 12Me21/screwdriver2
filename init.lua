@@ -11,10 +11,6 @@ end
 
 screwdriver2 = {}
 
-local function rotate_simple(_, _, _, _, new_param2)
-	if new_param2 % 32 > 3 then return false end
-end
-
 -- If the screwdriver mod is not installed, create a fake screwdriver variable.
 -- (This mod has an optional dependancy on screwdriver, so minetest loads screwdriver first if it exists.)
 -- - Some mods will only set on_rotate when `screwdriver` exists.
@@ -23,7 +19,9 @@ if not minetest.global_exists("screwdriver") then
 	screwdriver = {
 		ROTATE_FACE = 1,
 		ROTATE_AXIS = 2,
-		rotate_simple = rotate_simple,
+		rotate_simple = function(pos, node, player, mode, axis, amount, rotate_function)
+			if mode ~= 1 then return false end
+		end,
 		disallow = false, -- I doubt anyone actually used screwdriver.disallow but whatever.
 	}
 end
@@ -78,46 +76,60 @@ local facedir_cycles = {
 	z = {{ 4, 5, 6, 7},{ 8,11,10, 9},{ 0,16,20,12},{ 1,17,21,13},{ 2,18,22,14},{ 3,19,23,15}},
 }
 local wallmounted_cycles = {
-	x = {0, 4, 1, 5},
-	y = {4, 2, 5, 3},
-	z = {0, 3, 1, 2},
+	x = {{0, 4, 1, 5}},
+	y = {{4, 2, 5, 3}, {0, 1}},
+	z = {{0, 3, 1, 2}},
 }
+local function cycle_find(cycles, axis, param2, amount)
+	for _, cycle in ipairs(cycles[axis]) do
+		-- Find the current dir
+		for i, d in ipairs(cycle) do
+			if d == param2 then return cycle[1 + (i - 1 + amount) % #cycle] end
+		end
+	end
+end
 -- Functions to rotate a facedir/wallmounted value around an axis by a certain amount
-local rotate = {
+local PARAM2TYPES = {
 	-- Facedir: lower 5 bits used for direction, 0 - 23
-	facedir = function(param2, axis, amount)
-		local facedir = param2 % 32
-		for _, cycle in ipairs(facedir_cycles[axis]) do
-			-- Find the current facedir
-			-- Minetest adds table.indexof, but I refuse to use it because it returns -1 rather than nil
-			for i, fd in ipairs(cycle) do
-				if fd == facedir then
-					return param2 - facedir + cycle[1+(i-1 + amount) % 4] -- If only Lua didn't use 1 indexing...
-				end
-			end
-		end
-		return param2
-	end,
+	facedir = {
+		rotate = function(param2, axis, amount)
+			local facedir = param2 % 32
+			local new_facedir = cycle_find(facedir_cycles, axis, facedir, amount) or facedir
+			return param2 - facedir + new_facedir
+		end,
+		check_mode = function(old, new)
+			-- i can't remember if we're allowed to use bitwise operators yet
+			if old - old % 4 == new - new % 4 then return screwdriver.ROTATE_FACE end
+			return screwdriver.ROTATE_AXIS
+		end,
+	},
 	-- Wallmounted: lower 3 bits used, 0 - 5
-	wallmounted = function(param2, axis, amount)
-		local wallmounted = param2 % 8
-		for i, wm in ipairs(wallmounted_cycles[axis]) do
-			if wm == wallmounted then
-				return param2 - wallmounted + wallmounted_cycles[axis][1+(i-1 + amount) % 4]
-			end
-		end
-		return param2
-	end,
+	wallmounted = {
+		rotate = function(param2, axis, amount)
+			local wallmounted = param2 % 8
+			local new_wallmounted = cycle_find(wallmounted_cycles, axis, wallmounted, amount) or wallmounted
+			return param2 - wallmounted + new_wallmounted
+		end,
+		check_mode = function(old, new)
+			if (old<=1) == (new<=1) then return screwdriver.ROTATE_FACE end
+			return screwdriver.ROTATE_AXIS
+		end,
+	},
 	-- 4dir: lower 2 bits used, 0 - 3
-	["4dir"] = function(param2, axis, amount)
-		if axis ~= "y" then return param2 end
-		local dir = param2 % 4
-		return param2 - dir + ((dir + amount) % 4)
-	end,
+	["4dir"] = {
+		rotate = function(param2, axis, amount)
+			if axis ~= "y" then return param2 end
+			local dir = param2 % 4
+			return param2 - dir + ((dir + amount) % 4)
+		end,
+		check_mode = function(old, new)
+			return screwdriver.ROTATE_FACE
+		end,
+	},
 }
-rotate.colorfacedir = rotate.facedir
-rotate.colorwallmounted = rotate.wallmounted
-rotate.color4dir = rotate["4dir"]
+PARAM2TYPES.colorfacedir = PARAM2TYPES.facedir
+PARAM2TYPES.colorwallmounted = PARAM2TYPES.wallmounted
+PARAM2TYPES.color4dir = PARAM2TYPES["4dir"]
 --Todo: maybe support degrotate?
 
 local function rect(angle, radius)
@@ -194,15 +206,15 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	local def = minetest.registered_nodes[node.name]
 	if not def then return end -- probably unnessesary
 	
-	disp(def.sound_dig)
+	--disp(def.sound_dig)
 	
 	local on_rotate = def.on_rotate
 	if on_rotate == false then return end
 	--if on_rotate == nil and def.can_dig and not def.can_dig(vector.new(pos), player) then return end
 	
 	-- Choose rotation function based on paramtype2 (facedir/wallmounted)
-	local rotate_function = rotate[def.paramtype2]
-	if not rotate_function then return end
+	local param2type = PARAM2TYPES[def.paramtype2]
+	if not param2type then return end
 	
 	-- Choose rotation axis/direction and param2 based on click type and pointed location
 	local axis, amount
@@ -217,7 +229,8 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 		axis, amount = push_edge(normal, point)
 		if control.sneak then amount = -amount end
 	end
-	local new_param2 = rotate_function(node.param2, axis, amount)
+	local new_param2 = param2type.rotate(node.param2, axis, amount)
+	if not new_param2 then return end
 	
 	-- Calculate particle position
 	local particle_offset = vector.new()
@@ -226,20 +239,16 @@ function screwdriver.use(itemstack, player, pointed_thing, is_right_click)
 	-- Handle node's on_rotate function
 	local handled
 	if type(on_rotate) == "function" then
-		-- If a mod is loaded after screwdriver but before screwdriver2,
-		-- it will still end up using the old `rotate_simple` function.
-		-- So, we'll check that here, and override it in that case.
-		if on_rotate == screwdriver.rotate_simple then on_rotate = rotate_simple end
 		local result = on_rotate(
 			vector.new(pos),
 			table.copy(node),
 			player,
-			is_right_click and 2 or 1, -- Deprecated
+			param2type.check_mode(node.param2, new_param2),
 			new_param2,
 			-- New:
 			axis, -- "x", "y", or "z"
 			amount, -- 90 degrees = 1, etc.
-			rotate_function -- function(node.param2, axis, amount) -> new_param2
+			param2type.rotate -- function(node.param2, axis, amount) -> new_param2
 		)
 		if result == false then
 			return
